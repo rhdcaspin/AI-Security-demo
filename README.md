@@ -254,6 +254,7 @@ kubectl port-forward svc/grafana 3000:3000 -n monitoring
 - [IBM ART Integration](./docs/ibm-art-integration.md)
 - [Clair Integration](./docs/clair-integration.md)
 - [Garak Integration](./docs/garak-integration.md)
+- [Podman Desktop Setup](./docs/podman-setup.md)
 - [Troubleshooting Guide](./docs/troubleshooting.md)
 
 ## 🤝 Contributing

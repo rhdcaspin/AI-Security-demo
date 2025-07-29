@@ -1,0 +1,161 @@
+# AI Security Rules for MITRE ATLAS Detection
+# KubeCon 2025 Demo - Falco Rules
+
+# MITRE ATLAS T1551 - Evade ML Model (Adversarial Examples)
+- rule: Suspicious ML Model Query Pattern
+  desc: Detect high-frequency model queries that may indicate adversarial attack attempts
+  condition: >
+    (k8s_audit and ka.verb in (create, update) and ka.uri.path contains "/predict") and
+    (ka.requestObject.metadata.labels["app"] = "image-classifier") and
+    (count_over_time(30) > 100)
+  output: >
+    High-frequency ML model queries detected - possible adversarial attack
+    (user=%ka.user.name verb=%ka.verb uri=%ka.uri.path obj=%ka.target.object 
+     namespace=%ka.target.namespace mitre_atlas_technique=T1551)
+  priority: WARNING
+  tags: [mitre_atlas, T1551, adversarial_examples, model_evasion]
+
+# MITRE ATLAS T1552 - Steal ML Model (Model Extraction)
+- rule: ML Model Information Disclosure
+  desc: Detect attempts to extract model architecture or weights
+  condition: >
+    (spawned_process and proc.name in (curl, wget, python, python3)) and
+    (proc.args contains "/model/info" or proc.args contains "/model/weights" or 
+     proc.args contains "/logs" or proc.args contains "/admin") and
+    (container.image.repository contains "image-classifier")
+  output: >
+    Model extraction attempt detected
+    (user=%user.name command=%proc.cmdline container=%container.name 
+     image=%container.image.repository mitre_atlas_technique=T1552)
+  priority: HIGH
+  tags: [mitre_atlas, T1552, model_extraction, information_disclosure]
+
+# MITRE ATLAS T1565 - Data Manipulation (Data Poisoning)
+- rule: Suspicious File Upload to AI System
+  desc: Detect potentially malicious file uploads to AI/ML endpoints
+  condition: >
+    (spawned_process and proc.name in (python, python3, flask)) and
+    (proc.args contains "/upload" or proc.args contains "/feedback") and
+    (container.image.repository contains "image-classifier") and
+    (fd.name contains "/app/uploads" or fd.name contains "/app/data")
+  output: >
+    Suspicious file upload to AI system detected - possible data poisoning
+    (user=%user.name command=%proc.cmdline file=%fd.name container=%container.name 
+     mitre_atlas_technique=T1565)
+  priority: WARNING
+  tags: [mitre_atlas, T1565, data_poisoning, file_upload]
+
+# MITRE ATLAS T1499 - Endpoint Denial of Service
+- rule: ML Model DoS Attack
+  desc: Detect denial of service attacks against ML endpoints
+  condition: >
+    (k8s_audit and ka.verb in (create, update) and ka.uri.path contains "/predict") and
+    (ka.requestObject.metadata.labels["app"] = "image-classifier") and
+    (count_over_time(10) > 200)
+  output: >
+    Potential DoS attack against ML model detected
+    (user=%ka.user.name verb=%ka.verb uri=%ka.uri.path obj=%ka.target.object 
+     namespace=%ka.target.namespace mitre_atlas_technique=T1499)
+  priority: CRITICAL
+  tags: [mitre_atlas, T1499, denial_of_service, availability]
+
+# MITRE ATLAS T1574 - Hijack Execution Flow
+- rule: Suspicious Model Loading
+  desc: Detect attempts to load unauthorized models
+  condition: >
+    (spawned_process and proc.name in (python, python3)) and
+    (proc.args contains "/model/load" or proc.args contains "pickle.load" or 
+     proc.args contains "torch.load") and
+    (container.image.repository contains "image-classifier")
+  output: >
+    Unauthorized model loading attempt detected
+    (user=%user.name command=%proc.cmdline container=%container.name 
+     image=%container.image.repository mitre_atlas_technique=T1574)
+  priority: HIGH
+  tags: [mitre_atlas, T1574, model_hijack, execution_flow]
+
+# MITRE ATLAS T1036 - Masquerading
+- rule: AI Process Masquerading
+  desc: Detect processes masquerading as legitimate AI/ML tools
+  condition: >
+    (spawned_process and proc.name in (tensorflow, pytorch, scikit-learn, pandas)) and
+    (not container.image.repository contains "image-classifier") and
+    (container.image.repository contains "attack" or container.image.repository contains "exploit")
+  output: >
+    Suspicious AI/ML process masquerading detected
+    (user=%user.name command=%proc.cmdline container=%container.name 
+     image=%container.image.repository mitre_atlas_technique=T1036)
+  priority: WARNING
+  tags: [mitre_atlas, T1036, masquerading, process_spoofing]
+
+# Container Security - Privilege Escalation
+- rule: AI Container Privilege Escalation
+  desc: Detect privilege escalation in AI/ML containers
+  condition: >
+    (spawned_process and proc.name in (sudo, su, chmod, chown)) and
+    (container.image.repository contains "image-classifier") and
+    (proc.args contains "+s" or proc.args contains "777" or proc.args contains "root")
+  output: >
+    Privilege escalation attempt in AI container
+    (user=%user.name command=%proc.cmdline container=%container.name 
+     image=%container.image.repository)
+  priority: HIGH
+  tags: [privilege_escalation, container_security, ai_security]
+
+# Suspicious Network Activity
+- rule: AI Model Exfiltration Network Activity
+  desc: Detect suspicious outbound network connections from AI containers
+  condition: >
+    (outbound and fd.typechar = 4 and fd.sip exists) and
+    (container.image.repository contains "image-classifier") and
+    (fd.sport in (80, 443, 8080, 9090) and not fd.sip in (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16))
+  output: >
+    Suspicious outbound connection from AI container - possible data exfiltration
+    (user=%user.name connection=%fd.name src_ip=%fd.cip src_port=%fd.cport 
+     dst_ip=%fd.sip dst_port=%fd.sport container=%container.name)
+  priority: WARNING
+  tags: [network_security, data_exfiltration, ai_security]
+
+# File System Monitoring
+- rule: AI Model File Tampering
+  desc: Detect unauthorized modifications to AI model files
+  condition: >
+    (open_write and fd.typechar = 'f') and
+    (fd.name contains "/app/models" or fd.name contains "/app/data") and
+    (container.image.repository contains "image-classifier") and
+    (not proc.name in (python, python3, flask))
+  output: >
+    Unauthorized modification to AI model files
+    (user=%user.name command=%proc.cmdline file=%fd.name container=%container.name 
+     operation=%evt.type)
+  priority: HIGH
+  tags: [file_integrity, model_tampering, ai_security]
+
+# API Security
+- rule: AI API Abuse Detection
+  desc: Detect potential API abuse patterns
+  condition: >
+    (spawned_process and proc.name in (curl, wget, python, python3)) and
+    (proc.args contains "image-classifier-service" or proc.args contains ":5000") and
+    (proc.args contains "for" or proc.args contains "while" or count_over_time(5) > 50)
+  output: >
+    AI API abuse pattern detected - possible automated attack
+    (user=%user.name command=%proc.cmdline container=%container.name 
+     count=%count_over_time(5))
+  priority: WARNING
+  tags: [api_security, automated_attack, ai_security]
+
+# Kubernetes Security Context Violations
+- rule: AI Pod Security Policy Violation
+  desc: Detect AI pods running with dangerous security contexts
+  condition: >
+    (k8s_audit and ka.verb in (create, update) and ka.target.object = "pods") and
+    (ka.requestObject.metadata.labels["app"] = "image-classifier") and
+    (ka.requestObject.spec.securityContext.privileged = true or 
+     ka.requestObject.spec.securityContext.runAsUser = 0)
+  output: >
+    AI pod created with dangerous security context
+    (user=%ka.user.name pod=%ka.target.name namespace=%ka.target.namespace 
+     privileged=%ka.requestObject.spec.securityContext.privileged)
+  priority: HIGH
+  tags: [kubernetes_security, pod_security, ai_security] 

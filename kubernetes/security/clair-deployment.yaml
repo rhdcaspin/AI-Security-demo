@@ -1,0 +1,423 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clair-config
+  namespace: security
+  labels:
+    app: clair
+    component: vulnerability-scanner
+data:
+  config.yaml: |
+    http_listen_addr: ":6060"
+    introspection_addr: ":6061"
+    log_level: "info"
+    indexer:
+      connstring: "postgres://clair:clair@clair-postgres:5432/clair?sslmode=disable"
+      scanlock_retry: 10
+      layer_scan_concurrency: 5
+      migrations: true
+    matcher:
+      connstring: "postgres://clair:clair@clair-postgres:5432/clair?sslmode=disable"
+      max_conn_pool: 100
+      run: ""
+      migrations: true
+      indexer_addr: "clair-indexer:6060"
+    matchers:
+      names:
+        - "alpine"
+        - "aws"
+        - "debian"
+        - "oracle"
+        - "photon"
+        - "python"
+        - "rhel"
+        - "suse"
+        - "ubuntu"
+        - "ruby"
+        - "golang"
+    updaters:
+      sets:
+        - "alpine"
+        - "aws"
+        - "debian"
+        - "oracle"
+        - "photon"
+        - "python"
+        - "rhel"
+        - "suse"
+        - "ubuntu"
+        - "ruby"
+        - "golang"
+    notifier:
+      connstring: "postgres://clair:clair@clair-postgres:5432/clair?sslmode=disable"
+      delivery_interval: "1m"
+      poll_interval: "5m"
+      migrations: true
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: clair-postgres-secret
+  namespace: security
+  labels:
+    app: clair
+    component: database
+type: Opaque
+data:
+  # clair / clair (base64 encoded)
+  POSTGRES_USER: Y2xhaXI=
+  POSTGRES_PASSWORD: Y2xhaXI=
+  POSTGRES_DB: Y2xhaXI=
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clair-postgres
+  namespace: security
+  labels:
+    app: clair
+    component: database
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clair
+      component: database
+  template:
+    metadata:
+      labels:
+        app: clair
+        component: database
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+      - name: postgres
+        image: postgres:13-alpine
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: clair-postgres-secret
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: clair-postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: clair-postgres-secret
+              key: POSTGRES_DB
+        - name: PGDATA
+          value: "/var/lib/postgresql/data/pgdata"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 999
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        - name: tmp
+          mountPath: /tmp
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - clair
+            - -d
+            - clair
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - clair
+            - -d
+            - clair
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+      volumes:
+      - name: postgres-data
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clair-postgres
+  namespace: security
+  labels:
+    app: clair
+    component: database
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+    name: postgres
+  selector:
+    app: clair
+    component: database
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clair-indexer
+  namespace: security
+  labels:
+    app: clair
+    component: indexer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clair
+      component: indexer
+  template:
+    metadata:
+      labels:
+        app: clair
+        component: indexer
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: clair-indexer
+        image: quay.io/projectquay/clair:4.7.4
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/clair
+        args:
+        - -conf
+        - /config/config.yaml
+        - -mode
+        - indexer
+        ports:
+        - containerPort: 6060
+          name: clair-api
+        - containerPort: 6061
+          name: health
+        env:
+        - name: CLAIR_MODE
+          value: "indexer"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: tmp
+          mountPath: /tmp
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 6061
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 6061
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: clair-config
+      - name: tmp
+        emptyDir: {}
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:13-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until pg_isready -h clair-postgres -p 5432 -U clair; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+        env:
+        - name: PGPASSWORD
+          value: "clair"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clair-indexer
+  namespace: security
+  labels:
+    app: clair
+    component: indexer
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6060
+    targetPort: 6060
+    name: clair-api
+  - port: 6061
+    targetPort: 6061
+    name: health
+  selector:
+    app: clair
+    component: indexer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clair-matcher
+  namespace: security
+  labels:
+    app: clair
+    component: matcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clair
+      component: matcher
+  template:
+    metadata:
+      labels:
+        app: clair
+        component: matcher
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: clair-matcher
+        image: quay.io/projectquay/clair:4.7.4
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/clair
+        args:
+        - -conf
+        - /config/config.yaml
+        - -mode
+        - matcher
+        ports:
+        - containerPort: 6060
+          name: clair-api
+        - containerPort: 6061
+          name: health
+        env:
+        - name: CLAIR_MODE
+          value: "matcher"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        - name: tmp
+          mountPath: /tmp
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 6061
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 6061
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: clair-config
+      - name: tmp
+        emptyDir: {}
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:13-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until pg_isready -h clair-postgres -p 5432 -U clair; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+        env:
+        - name: PGPASSWORD
+          value: "clair"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clair-matcher
+  namespace: security
+  labels:
+    app: clair
+    component: matcher
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6060
+    targetPort: 6060
+    name: clair-api
+  - port: 6061
+    targetPort: 6061
+    name: health
+  selector:
+    app: clair
+    component: matcher 

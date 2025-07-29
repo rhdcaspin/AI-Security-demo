@@ -1,0 +1,157 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-service
+  namespace: ai-demo
+  labels:
+    app: llm-service
+    component: vulnerable-llm
+    framework: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-service
+  template:
+    metadata:
+      labels:
+        app: llm-service
+        component: vulnerable-llm
+        framework: demo
+      annotations:
+        description: "Vulnerable LLM Service for Garak Testing"
+    spec:
+      # Intentionally insecure configuration for demo
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+        fsGroup: 0
+      containers:
+      - name: llm-service
+        image: kubecon-demo/llm-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5003
+          name: http
+          protocol: TCP
+        # Intentionally insecure for demo
+        securityContext:
+          allowPrivilegeEscalation: true
+          privileged: false
+          runAsNonRoot: false
+          runAsUser: 0
+          capabilities:
+            add:
+            - NET_ADMIN
+            drop: []
+          readOnlyRootFilesystem: false
+        env:
+        - name: FLASK_ENV
+          value: "production"
+        - name: FLASK_DEBUG
+          value: "0"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: LLM_MODEL_NAME
+          value: "vulnerable-demo-llm"
+        - name: MAX_TOKENS
+          value: "500"
+        - name: TEMPERATURE
+          value: "0.7"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5003
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5003
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: host-access
+          mountPath: /host
+          readOnly: false
+      volumes:
+      - name: host-access
+        hostPath:
+          path: /
+          type: Directory
+      serviceAccountName: llm-service-sa
+      automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-service
+  namespace: ai-demo
+  labels:
+    app: llm-service
+    component: vulnerable-llm
+    framework: demo
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5003
+    protocol: TCP
+    name: http
+  selector:
+    app: llm-service
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: llm-service-sa
+  namespace: ai-demo
+  labels:
+    app: llm-service
+    component: vulnerable-llm
+---
+# Deliberately permissive RBAC for demo vulnerabilities
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: llm-service-role
+  labels:
+    app: llm-service
+    component: vulnerable-llm
+rules:
+- apiGroups: [""]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["apps"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["*"]
+  verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: llm-service-binding
+  labels:
+    app: llm-service
+    component: vulnerable-llm
+subjects:
+- kind: ServiceAccount
+  name: llm-service-sa
+  namespace: ai-demo
+roleRef:
+  kind: ClusterRole
+  name: llm-service-role
+  apiGroup: rbac.authorization.k8s.io 

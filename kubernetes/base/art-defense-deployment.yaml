@@ -1,0 +1,157 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: art-defense-service
+  namespace: ai-demo
+  labels:
+    app: art-defense-service
+    component: ai-defense
+    framework: ibm-art
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: art-defense-service
+  template:
+    metadata:
+      labels:
+        app: art-defense-service
+        component: ai-defense
+        framework: ibm-art
+      annotations:
+        description: "IBM ART Defense Service for AI Security"
+    spec:
+      # Secure configuration for defense service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: art-defense-service
+        image: kubecon-demo/art-defense-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5001
+          name: http
+          protocol: TCP
+        # Secure configuration
+        securityContext:
+          allowPrivilegeEscalation: false
+          privileged: false
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: false
+        env:
+        - name: FLASK_ENV
+          value: "production"
+        - name: FLASK_DEBUG
+          value: "0"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: ART_DEFENSE_LEVEL
+          value: "medium"
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5001
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5001
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: uploads
+          mountPath: /app/uploads
+        - name: models
+          mountPath: /app/models
+        - name: defended
+          mountPath: /app/defended
+      volumes:
+      - name: uploads
+        emptyDir: {}
+      - name: models
+        emptyDir: {}
+      - name: defended
+        emptyDir: {}
+      serviceAccountName: art-defense-sa
+      automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: art-defense-service
+  namespace: ai-demo
+  labels:
+    app: art-defense-service
+    component: ai-defense
+    framework: ibm-art
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5001
+    protocol: TCP
+    name: http
+  selector:
+    app: art-defense-service
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: art-defense-sa
+  namespace: ai-demo
+  labels:
+    app: art-defense-service
+    component: ai-defense
+    framework: ibm-art
+---
+# More restrictive RBAC for defense service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: art-defense-role
+  namespace: ai-demo
+  labels:
+    app: art-defense-service
+    component: ai-defense
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: art-defense-binding
+  namespace: ai-demo
+  labels:
+    app: art-defense-service
+    component: ai-defense
+subjects:
+- kind: ServiceAccount
+  name: art-defense-sa
+  namespace: ai-demo
+roleRef:
+  kind: Role
+  name: art-defense-role
+  apiGroup: rbac.authorization.k8s.io 

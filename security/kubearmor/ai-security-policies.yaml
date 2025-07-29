@@ -1,0 +1,314 @@
+# KubeArmor Security Policies for AI/ML Workload Protection
+# KubeCon 2025 Demo - MITRE ATLAS Defense
+
+apiVersion: security.kubearmor.com/v1
+kind: KubeArmorPolicy
+metadata:
+  name: ai-model-file-protection
+  namespace: ai-demo
+  annotations:
+    description: "Protect AI model files from unauthorized access"
+    mitre-atlas-defense: "T1552,T1565"
+spec:
+  selector:
+    matchLabels:
+      app: image-classifier
+  file:
+    matchPaths:
+    # Protect model files from unauthorized access
+    - path: /app/models/
+      readOnly: true
+      ownerOnly: true
+    # Monitor critical configuration files
+    - path: /app/app.py
+      readOnly: true
+    # Allow only specific processes to access uploads
+    - path: /app/uploads/
+      fromSource:
+      - path: /usr/local/bin/python*
+      - path: /usr/bin/python*
+    # Block access to sensitive host paths
+    - path: /host/
+      action: Block
+    # Protect data directory with restricted access
+    - path: /app/data/
+      fromSource:
+      - path: /usr/local/bin/python*
+      - path: /usr/bin/python*
+      action: Allow
+  action: Block
+---
+apiVersion: security.kubearmor.com/v1
+kind: KubeArmorPolicy
+metadata:
+  name: ai-process-execution-control
+  namespace: ai-demo
+  annotations:
+    description: "Control process execution in AI containers"
+    mitre-atlas-defense: "T1574,T1036"
+spec:
+  selector:
+    matchLabels:
+      app: image-classifier
+  process:
+    matchPaths:
+    # Allow only necessary Python processes
+    - path: /usr/local/bin/python*
+    - path: /usr/bin/python*
+    - path: /bin/sh
+    - path: /bin/bash
+    # Block potentially dangerous executables
+    - path: /bin/wget
+      action: Block
+    - path: /usr/bin/curl
+      action: Block
+    - path: /bin/nc
+      action: Block
+    - path: /bin/netcat
+      action: Block
+    # Block privilege escalation tools
+    - path: /bin/su
+      action: Block
+    - path: /usr/bin/sudo
+      action: Block
+    - path: /bin/chmod
+      action: Block
+    - path: /bin/chown
+      action: Block
+    # Monitor for suspicious ML tools execution
+    matchDirectories:
+    - dir: /tmp/
+      recursive: true
+      action: Audit
+    - dir: /var/tmp/
+      recursive: true
+      action: Audit
+  action: Allow
+---
+apiVersion: security.kubearmor.com/v1
+kind: KubeArmorPolicy
+metadata:
+  name: ai-network-security-policy
+  namespace: ai-demo
+  annotations:
+    description: "Network security controls for AI workloads"
+    mitre-atlas-defense: "T1041,T1567"
+spec:
+  selector:
+    matchLabels:
+      app: image-classifier
+  network:
+    matchProtocols:
+    - protocol: tcp
+      fromSource:
+      # Allow inbound connections only on application port
+      - port: 5000
+      action: Allow
+    - protocol: tcp
+      fromSource:
+      # Block outbound connections to suspicious ports
+      - port: 22
+      action: Block
+    - protocol: tcp
+      fromSource:
+      # Block common exfiltration ports
+      - port: 21
+      action: Block
+    - protocol: tcp
+      fromSource:
+      - port: 23
+      action: Block
+    - protocol: tcp
+      fromSource:
+      # Allow DNS
+      - port: 53
+      action: Allow
+    - protocol: udp
+      fromSource:
+      - port: 53
+      action: Allow
+  action: Block
+---
+apiVersion: security.kubearmor.com/v1
+kind: KubeArmorPolicy
+metadata:
+  name: ai-system-call-monitoring
+  namespace: ai-demo
+  annotations:
+    description: "Monitor system calls for AI security threats"
+    mitre-atlas-defense: "T1055,T1082"
+spec:
+  selector:
+    matchLabels:
+      app: image-classifier
+  syscalls:
+    matchSyscalls:
+    # Monitor file operations
+    - syscall:
+      - open
+      - openat
+      - read
+      - write
+      path: /app/models/
+      action: Audit
+    # Monitor process creation
+    - syscall:
+      - execve
+      - execveat
+      action: Audit
+    # Monitor network operations
+    - syscall:
+      - socket
+      - connect
+      - bind
+      action: Audit
+    # Block dangerous system calls
+    - syscall:
+      - ptrace
+      action: Block
+    - syscall:
+      - mount
+      action: Block
+    - syscall:
+      - umount
+      - umount2
+      action: Block
+    # Monitor privilege operations
+    - syscall:
+      - setuid
+      - setgid
+      - setreuid
+      - setregid
+      action: Audit
+  action: Allow
+---
+apiVersion: security.kubearmor.com/v1
+kind: KubeArmorPolicy
+metadata:
+  name: ai-capability-restriction
+  namespace: ai-demo
+  annotations:
+    description: "Restrict Linux capabilities for AI containers"
+    mitre-atlas-defense: "General defense in depth"
+spec:
+  selector:
+    matchLabels:
+      app: image-classifier
+  capabilities:
+    matchCapabilities:
+    # Block dangerous capabilities
+    - capability: CAP_SYS_ADMIN
+      action: Block
+    - capability: CAP_NET_ADMIN
+      action: Block
+    - capability: CAP_SYS_PTRACE
+      action: Block
+    - capability: CAP_SYS_MODULE
+      action: Block
+    - capability: CAP_DAC_OVERRIDE
+      action: Block
+    - capability: CAP_SETUID
+      action: Audit
+    - capability: CAP_SETGID
+      action: Audit
+  action: Allow
+---
+# Host-level protection policy
+apiVersion: security.kubearmor.com/v1
+kind: KubeArmorHostPolicy
+metadata:
+  name: ai-host-protection
+  annotations:
+    description: "Protect host system from AI workload attacks"
+    mitre-atlas-defense: "T1610,T1611"
+spec:
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/os: linux
+  file:
+    matchPaths:
+    # Protect critical host directories
+    - path: /etc/
+      readOnly: true
+    - path: /boot/
+      action: Block
+    - path: /sys/
+      readOnly: true
+    # Monitor container runtime
+    - path: /var/lib/containerd/
+      action: Audit
+    - path: /var/lib/docker/
+      action: Audit
+    # Protect Kubernetes configuration
+    - path: /etc/kubernetes/
+      readOnly: true
+    - path: /var/lib/kubelet/
+      readOnly: true
+  process:
+    matchPaths:
+    # Monitor for container escapes
+    - path: /usr/bin/docker
+      action: Audit
+    - path: /usr/bin/containerd
+      action: Audit
+    - path: /usr/bin/runc
+      action: Audit
+    # Block common attack tools
+    - path: /usr/bin/nmap
+      action: Block
+    - path: /usr/bin/nc
+      action: Block
+    - path: /usr/bin/netcat
+      action: Block
+  action: Allow
+---
+# Additional monitoring policy for attack detection
+apiVersion: security.kubearmor.com/v1
+kind: KubeArmorPolicy
+metadata:
+  name: ai-attack-detection
+  namespace: ai-demo
+  annotations:
+    description: "Detect specific AI attack patterns"
+    mitre-atlas-defense: "T1595,T1590"
+spec:
+  selector:
+    matchLabels:
+      app: image-classifier
+  file:
+    matchPaths:
+    # Monitor for model extraction attempts
+    - path: /app/models/
+      fromSource:
+      - path: /usr/bin/base64
+        action: Audit
+      - path: /usr/bin/xxd
+        action: Audit
+      - path: /bin/tar
+        action: Audit
+      - path: /bin/gzip
+        action: Audit
+    # Monitor suspicious upload activities
+    - path: /app/uploads/
+      fromSource:
+      - path: /usr/bin/file
+        action: Audit
+      - path: /usr/bin/strings
+        action: Audit
+  process:
+    matchPaths:
+    # Monitor for reconnaissance tools
+    - path: /usr/bin/find
+      action: Audit
+    - path: /bin/ls
+      fromSource:
+      - dir: /app/models/
+        action: Audit
+    # Monitor for data exfiltration tools
+    - path: /usr/bin/base64
+      action: Audit
+    - path: /usr/bin/xxd
+      action: Audit
+    - path: /bin/tar
+      action: Audit
+  action: Allow 

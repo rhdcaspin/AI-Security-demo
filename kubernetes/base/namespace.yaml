@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-demo
+  labels:
+    name: ai-demo
+    security-monitoring: "enabled"
+    mitre-atlas-demo: "true"
+  annotations:
+    description: "KubeCon 2025 Demo - AI Security with MITRE ATLAS"
+    demo.kubecon.io/version: "1.0"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security
+  labels:
+    name: security
+    monitoring: "true"
+  annotations:
+    description: "Security tools and monitoring"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring
+    observability: "true"
+  annotations:
+    description: "Observability stack - Prometheus, Grafana" 

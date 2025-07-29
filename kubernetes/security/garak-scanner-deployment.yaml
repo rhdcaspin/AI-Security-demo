@@ -1,0 +1,202 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: garak-scanner-service
+  namespace: security
+  labels:
+    app: garak-scanner-service
+    component: llm-security-scanner
+    framework: garak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: garak-scanner-service
+  template:
+    metadata:
+      labels:
+        app: garak-scanner-service
+        component: llm-security-scanner
+        framework: garak
+      annotations:
+        description: "Garak LLM Vulnerability Scanner"
+    spec:
+      # Secure configuration
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: garak-scanner-service
+        image: kubecon-demo/garak-scanner-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5004
+          name: http
+          protocol: TCP
+        # Secure configuration
+        securityContext:
+          allowPrivilegeEscalation: false
+          privileged: false
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: false
+        env:
+        - name: FLASK_ENV
+          value: "production"
+        - name: FLASK_DEBUG
+          value: "0"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: DEFAULT_LLM_ENDPOINT
+          value: "http://llm-service.ai-demo.svc.cluster.local"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5004
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5004
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: garak-configs
+          mountPath: /app/garak_configs
+        - name: scan-results
+          mountPath: /app/scan_results
+      volumes:
+      - name: garak-configs
+        emptyDir: {}
+      - name: scan-results
+        emptyDir: {}
+      serviceAccountName: garak-scanner-sa
+      automountServiceAccountToken: true
+      initContainers:
+      - name: wait-for-llm-service
+        image: curlimages/curl:latest
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for LLM service..."
+          until curl -f http://llm-service.ai-demo.svc.cluster.local/health; do
+            echo "Waiting for LLM service to be ready..."
+            sleep 5
+          done
+          echo "LLM service is ready!"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: garak-scanner-service
+  namespace: security
+  labels:
+    app: garak-scanner-service
+    component: llm-security-scanner
+    framework: garak
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5004
+    protocol: TCP
+    name: http
+  selector:
+    app: garak-scanner-service
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: garak-scanner-sa
+  namespace: security
+  labels:
+    app: garak-scanner-service
+    component: llm-security-scanner
+---
+# Restrictive RBAC for scanner service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: garak-scanner-role
+  namespace: security
+  labels:
+    app: garak-scanner-service
+    component: llm-security-scanner
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: garak-scanner-binding
+  namespace: security
+  labels:
+    app: garak-scanner-service
+    component: llm-security-scanner
+subjects:
+- kind: ServiceAccount
+  name: garak-scanner-sa
+  namespace: security
+roleRef:
+  kind: Role
+  name: garak-scanner-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Cross-namespace role to access LLM service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: garak-scanner-cross-namespace-role
+  namespace: ai-demo
+  labels:
+    app: garak-scanner-service
+    component: llm-security-scanner
+rules:
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: garak-scanner-cross-namespace-binding
+  namespace: ai-demo
+  labels:
+    app: garak-scanner-service
+    component: llm-security-scanner
+subjects:
+- kind: ServiceAccount
+  name: garak-scanner-sa
+  namespace: security
+roleRef:
+  kind: Role
+  name: garak-scanner-cross-namespace-role
+  apiGroup: rbac.authorization.k8s.io 

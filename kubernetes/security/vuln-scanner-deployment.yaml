@@ -1,0 +1,169 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vuln-scanner-service
+  namespace: security
+  labels:
+    app: vuln-scanner-service
+    component: vulnerability-scanner
+    framework: clair
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vuln-scanner-service
+  template:
+    metadata:
+      labels:
+        app: vuln-scanner-service
+        component: vulnerability-scanner
+        framework: clair
+      annotations:
+        description: "Container Vulnerability Scanner using Clair"
+    spec:
+      # Secure configuration
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+      - name: vuln-scanner-service
+        image: kubecon-demo/vuln-scanner-service:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5002
+          name: http
+          protocol: TCP
+        # Secure configuration
+        securityContext:
+          allowPrivilegeEscalation: false
+          privileged: false
+          runAsNonRoot: true
+          runAsUser: 1001
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: false
+        env:
+        - name: FLASK_ENV
+          value: "production"
+        - name: FLASK_DEBUG
+          value: "0"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: CLAIR_INDEXER_URL
+          value: "http://clair-indexer.security.svc.cluster.local:6060"
+        - name: CLAIR_MATCHER_URL
+          value: "http://clair-matcher.security.svc.cluster.local:6060"
+        - name: DOCKER_REGISTRY
+          value: "docker.io"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5002
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5002
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: scan-results
+          mountPath: /app/scan_results
+      volumes:
+      - name: scan-results
+        emptyDir: {}
+      serviceAccountName: vuln-scanner-sa
+      automountServiceAccountToken: true
+      initContainers:
+      - name: wait-for-clair
+        image: curlimages/curl:latest
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for Clair services..."
+          until curl -f http://clair-indexer.security.svc.cluster.local:6061/healthz; do
+            echo "Waiting for Clair indexer..."
+            sleep 5
+          done
+          until curl -f http://clair-matcher.security.svc.cluster.local:6061/healthz; do
+            echo "Waiting for Clair matcher..."
+            sleep 5
+          done
+          echo "Clair services are ready!"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vuln-scanner-service
+  namespace: security
+  labels:
+    app: vuln-scanner-service
+    component: vulnerability-scanner
+    framework: clair
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5002
+    protocol: TCP
+    name: http
+  selector:
+    app: vuln-scanner-service
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vuln-scanner-sa
+  namespace: security
+  labels:
+    app: vuln-scanner-service
+    component: vulnerability-scanner
+---
+# Restrictive RBAC for vulnerability scanner
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vuln-scanner-role
+  namespace: security
+  labels:
+    app: vuln-scanner-service
+    component: vulnerability-scanner
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vuln-scanner-binding
+  namespace: security
+  labels:
+    app: vuln-scanner-service
+    component: vulnerability-scanner
+subjects:
+- kind: ServiceAccount
+  name: vuln-scanner-sa
+  namespace: security
+roleRef:
+  kind: Role
+  name: vuln-scanner-role
+  apiGroup: rbac.authorization.k8s.io 

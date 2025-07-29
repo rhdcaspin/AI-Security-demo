@@ -1,0 +1,8 @@
+Flask==2.3.3
+Werkzeug==2.3.7
+requests==2.31.0
+PyYAML==6.0.1
+gunicorn==21.2.0
+
+# Note: In production, you would install actual Garak here:
+# garak==0.9.0 

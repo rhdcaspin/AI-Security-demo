@@ -1,0 +1,166 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-classifier
+  namespace: ai-demo
+  labels:
+    app: image-classifier
+    component: vulnerable-ai
+    mitre-atlas: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: image-classifier
+  template:
+    metadata:
+      labels:
+        app: image-classifier
+        component: vulnerable-ai
+        mitre-atlas: "true"
+      annotations:
+        # Deliberately insecure annotations for demo
+        security.alpha.kubernetes.io/unsafe-sysctls: "kernel.shm_rmid_forced"
+    spec:
+      # Intentionally insecure configuration for demo
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+        fsGroup: 0
+      containers:
+      - name: image-classifier
+        image: kubecon-demo/image-classifier:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 5000
+          name: http
+          protocol: TCP
+        # Deliberately insecure configuration
+        securityContext:
+          allowPrivilegeEscalation: true
+          privileged: false
+          runAsNonRoot: false
+          runAsUser: 0
+          capabilities:
+            add:
+            - NET_ADMIN
+            - SYS_ADMIN
+          readOnlyRootFilesystem: false
+        env:
+        - name: FLASK_ENV
+          value: "development"
+        - name: FLASK_DEBUG
+          value: "1"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: uploads
+          mountPath: /app/uploads
+        - name: models
+          mountPath: /app/models
+        - name: data
+          mountPath: /app/data
+        # Vulnerable volume mounts for demo
+        - name: host-root
+          mountPath: /host
+          readOnly: false
+      volumes:
+      - name: uploads
+        emptyDir: {}
+      - name: models
+        emptyDir: {}
+      - name: data
+        emptyDir: {}
+      # Deliberately dangerous volume mount for demo
+      - name: host-root
+        hostPath:
+          path: /
+          type: Directory
+      # No security policies applied
+      serviceAccountName: image-classifier-sa
+      automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-classifier-service
+  namespace: ai-demo
+  labels:
+    app: image-classifier
+    component: vulnerable-ai
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 5000
+    protocol: TCP
+    name: http
+  selector:
+    app: image-classifier
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: image-classifier-sa
+  namespace: ai-demo
+  labels:
+    app: image-classifier
+    component: vulnerable-ai
+---
+# Deliberately permissive RBAC for demo
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: image-classifier-role
+  labels:
+    app: image-classifier
+    component: vulnerable-ai
+rules:
+- apiGroups: [""]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["apps"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["*"]
+  verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: image-classifier-binding
+  labels:
+    app: image-classifier
+    component: vulnerable-ai
+subjects:
+- kind: ServiceAccount
+  name: image-classifier-sa
+  namespace: ai-demo
+roleRef:
+  kind: ClusterRole
+  name: image-classifier-role
+  apiGroup: rbac.authorization.k8s.io 

@@ -68,17 +68,48 @@ The demo consists of several key components:
 - Kubernetes cluster (1.24+)
 - kubectl configured
 - Helm 3.x installed
-- Docker for building images
+- **Container Runtime**: Podman Desktop (recommended) OR Docker
+  - [Podman Desktop](https://podman-desktop.io/) - Secure, daemonless container engine
+  - [Docker Desktop](https://www.docker.com/products/docker-desktop/) - Traditional container platform
+
+#### Why Podman Desktop for AI Security?
+
+**🔒 Enhanced Security:**
+- **Rootless containers** - No daemon running as root
+- **No background daemon** - Reduced attack surface
+- **Fork-exec model** - Better process isolation
+
+**🏢 Enterprise Benefits:**
+- **OCI compliant** - Works with all container registries
+- **Docker compatibility** - Drop-in replacement for Docker commands
+- **Red Hat backed** - Enterprise support and security updates
+- **Air-gapped environments** - Better support for disconnected deployments
 
 ### Installation
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/[your-org]/kubecon2025-demo
-   cd kubecon2025-demo
+   git clone https://github.com/rhdcaspin/AI-Security-demo
+   cd AI-Security-demo
    ```
 
-2. **Set up the demo environment**
+2. **Set up container runtime**
+   
+   **Option A: Podman Desktop (Recommended)**
+   ```bash
+   # Install Podman Desktop from https://podman-desktop.io/
+   # Verify installation
+   podman --version
+   ```
+   
+   **Option B: Docker Desktop**
+   ```bash
+   # Install Docker Desktop from https://docker.com/
+   # Verify installation
+   docker --version
+   ```
+
+3. **Set up the demo environment**
    ```bash
    ./scripts/setup-demo.sh
    ```

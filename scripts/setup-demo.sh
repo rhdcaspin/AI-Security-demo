@@ -101,45 +101,77 @@ create_namespaces() {
 build_images() {
     log_step "Building container images..."
     
+    # Check for container runtime
+    if command -v podman &> /dev/null; then
+        CONTAINER_CMD="podman"
+        log_info "Using Podman as container runtime"
+    elif command -v docker &> /dev/null; then
+        CONTAINER_CMD="docker"
+        log_info "Using Docker as container runtime"
+    else
+        log_error "Neither Podman nor Docker found. Please install Podman Desktop or Docker."
+        exit 1
+    fi
+    
     # Build image classifier
     log_info "Building image classifier..."
     cd "$PROJECT_ROOT/applications/image-classifier"
-    docker build -t kubecon-demo/image-classifier:latest .
+    $CONTAINER_CMD build -t kubecon-demo/image-classifier:latest .
     
     # Build IBM ART defense service
     log_info "Building IBM ART defense service..."
-    docker build -f Dockerfile.art-defense -t kubecon-demo/art-defense-service:latest .
+    $CONTAINER_CMD build -f Dockerfile.art-defense -t kubecon-demo/art-defense-service:latest .
     
     # Build vulnerability scanner service
     log_info "Building vulnerability scanner service..."
     cd "$PROJECT_ROOT/applications/vuln-scanner"
-    docker build -t kubecon-demo/vuln-scanner-service:latest .
+    $CONTAINER_CMD build -t kubecon-demo/vuln-scanner-service:latest .
     
     # Build LLM service
     log_info "Building vulnerable LLM service..."
     cd "$PROJECT_ROOT/applications/llm-service"
-    docker build -t kubecon-demo/llm-service:latest .
+    $CONTAINER_CMD build -t kubecon-demo/llm-service:latest .
     
     # Build Garak scanner service
     log_info "Building Garak scanner service..."
     cd "$PROJECT_ROOT/applications/garak-scanner"
-    docker build -t kubecon-demo/garak-scanner-service:latest .
+    $CONTAINER_CMD build -t kubecon-demo/garak-scanner-service:latest .
     
-    # Tag for local registry (if using kind/minikube)
+    # Load images for local Kubernetes clusters
     if kubectl config current-context | grep -E "(kind|minikube)" &> /dev/null; then
         log_info "Detected local Kubernetes cluster, loading images..."
+        
         if command -v kind &> /dev/null && kind get clusters 2>/dev/null | grep -q "kind"; then
-            kind load docker-image kubecon-demo/image-classifier:latest
-            kind load docker-image kubecon-demo/art-defense-service:latest
-            kind load docker-image kubecon-demo/vuln-scanner-service:latest
-            kind load docker-image kubecon-demo/llm-service:latest
-            kind load docker-image kubecon-demo/garak-scanner-service:latest
+            log_info "Loading images into kind cluster..."
+            if [[ "$CONTAINER_CMD" == "podman" ]]; then
+                # For Podman, we need to save and load images
+                podman save kubecon-demo/image-classifier:latest | kind load image-archive /dev/stdin
+                podman save kubecon-demo/art-defense-service:latest | kind load image-archive /dev/stdin
+                podman save kubecon-demo/vuln-scanner-service:latest | kind load image-archive /dev/stdin
+                podman save kubecon-demo/llm-service:latest | kind load image-archive /dev/stdin
+                podman save kubecon-demo/garak-scanner-service:latest | kind load image-archive /dev/stdin
+            else
+                # For Docker, use the direct method
+                kind load docker-image kubecon-demo/image-classifier:latest
+                kind load docker-image kubecon-demo/art-defense-service:latest
+                kind load docker-image kubecon-demo/vuln-scanner-service:latest
+                kind load docker-image kubecon-demo/llm-service:latest
+                kind load docker-image kubecon-demo/garak-scanner-service:latest
+            fi
         elif command -v minikube &> /dev/null; then
-            minikube image load kubecon-demo/image-classifier:latest
-            minikube image load kubecon-demo/art-defense-service:latest
-            minikube image load kubecon-demo/vuln-scanner-service:latest
-            minikube image load kubecon-demo/llm-service:latest
-            minikube image load kubecon-demo/garak-scanner-service:latest
+            log_info "Loading images into minikube cluster..."
+            if [[ "$CONTAINER_CMD" == "podman" ]]; then
+                # For Podman with minikube, we need to configure minikube to use podman
+                eval $(minikube podman-env)
+                # Images are already available in podman, minikube will use them
+            else
+                # For Docker with minikube
+                minikube image load kubecon-demo/image-classifier:latest
+                minikube image load kubecon-demo/art-defense-service:latest
+                minikube image load kubecon-demo/vuln-scanner-service:latest
+                minikube image load kubecon-demo/llm-service:latest
+                minikube image load kubecon-demo/garak-scanner-service:latest
+            fi
         fi
     fi
     

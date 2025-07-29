@@ -190,9 +190,11 @@ graph TB
 
 ## Technical Implementation
 
-### Docker Images
+### Container Images
 - `kubecon-demo/image-classifier:latest` - Vulnerable application
 - `kubecon-demo/art-defense-service:latest` - IBM ART defense service
+
+**Note**: Images can be built using either Podman Desktop (recommended) or Docker.
 
 ### Kubernetes Resources
 - Enhanced security policies

@@ -1,4 +1,4 @@
-# KubeCon 2025 Demo: Aligning Enterprise AI Security with MITRE ATLAS
+# AI Security Demo: Aligning Enterprise AI Security with MITRE ATLAS
 
 ![Demo Architecture](./docs/images/architecture-overview.png)
 
